@@ -22,6 +22,8 @@ import (
 	decoyssh "github.com/honeysight/honeysight/internal/decoy/ssh"
 	"github.com/honeysight/honeysight/internal/decoy/web"
 	"github.com/honeysight/honeysight/internal/detect"
+	"github.com/honeysight/honeysight/internal/enrich"
+	"github.com/honeysight/honeysight/internal/export"
 	"github.com/honeysight/honeysight/internal/fingerprint"
 	"github.com/honeysight/honeysight/internal/store"
 	"github.com/honeysight/honeysight/internal/store/sqlite"
@@ -100,12 +102,48 @@ func main() {
 	canaries := canary.New(canaryStore, time.Hour)
 
 	tracker := track.New(cfg.BlockThreshold, cfg.Window, cfg.BlockTTL)
-	bus := core.NewBus(0, log,
-		storeSub{log: log, s: st},
-		logSub{log: log},
-		trackerSub{log: log, t: tracker},
-	)
+
+	// Optional IOC export: batches events (clean JSON + STIX 2.1 bundle)
+	// to the operator's webhook. Enrichment is local (MaxMind .mmdb).
+	var exporter *export.Exporter
+	var bus *core.Bus
+	if cfg.Export.WebhookURL != "" {
+		var geo enrich.Enricher
+		if cfg.Enrich.GeoIPDB != "" {
+			if mm, err := enrich.NewMaxMind(cfg.Enrich.GeoIPDB); err != nil {
+				log.Warn("geoip enrichment disabled", "err", err)
+			} else {
+				defer mm.Close()
+				geo = mm
+				log.Info("geoip enrichment enabled", "db", cfg.Enrich.GeoIPDB)
+			}
+		}
+		exporter = export.New(log, geo, export.Options{
+			URL:       cfg.Export.WebhookURL,
+			BatchSize: cfg.Export.BatchSize,
+			Interval:  cfg.Export.FlushInterval,
+			Timeout:   cfg.Export.Timeout,
+			Retries:   cfg.Export.Retries,
+		})
+		bus = core.NewBus(0, log,
+			storeSub{log: log, s: st},
+			logSub{log: log},
+			trackerSub{log: log, t: tracker},
+			exporter,
+		)
+		log.Info("ioc export enabled", "webhook", cfg.Export.WebhookURL,
+			"batch", cfg.Export.BatchSize, "interval", cfg.Export.FlushInterval)
+	} else {
+		bus = core.NewBus(0, log,
+			storeSub{log: log, s: st},
+			logSub{log: log},
+			trackerSub{log: log, t: tracker},
+		)
+	}
 	bus.Start()
+	if exporter != nil {
+		exporter.Start(cfg.Export.FlushInterval)
+	}
 
 	handler := web.New(log, bus, tracker, engine, canaries, cfg.TrustedProxies, cfg.Tarpit)
 	srv := &http.Server{
@@ -163,6 +201,9 @@ func main() {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error("http shutdown", "err", err)
+	}
+	if exporter != nil {
+		exporter.Stop() // final flush of the remaining batch
 	}
 	if err := st.Close(); err != nil {
 		log.Error("store close", "err", err)

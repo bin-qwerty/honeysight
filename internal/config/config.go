@@ -33,6 +33,17 @@ type Config struct {
 	// TrustedProxies: peer addresses allowed to set X-Real-IP /
 	// X-Forwarded-For. Empty means "every peer is the real source".
 	TrustedProxies []string `yaml:"trusted_proxies"`
+	Export         struct {
+		WebhookURL    string        `yaml:"webhook_url"` // empty = export disabled
+		BatchSize     int           `yaml:"batch_size"`
+		FlushInterval time.Duration `yaml:"flush_interval"`
+		Timeout       time.Duration `yaml:"timeout"`
+		Retries       int           `yaml:"retries"`
+	} `yaml:"export"`
+	Enrich struct {
+		// GeoIPDB: local MaxMind .mmdb (GeoLite2-City); empty = no enrichment.
+		GeoIPDB string `yaml:"geoip_db"`
+	} `yaml:"enrich"`
 }
 
 // Load reads the YAML config at path and applies defaults for unset keys.
@@ -65,6 +76,10 @@ func Load(path string) (*Config, error) {
 	c.Window = 5 * time.Minute
 	c.BlockTTL = 10 * time.Minute
 	c.Tarpit = 1500 * time.Millisecond
+	c.Export.BatchSize = 50
+	c.Export.FlushInterval = 30 * time.Second
+	c.Export.Timeout = 10 * time.Second
+	c.Export.Retries = 3
 
 	if err := yaml.Unmarshal(data, c); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)

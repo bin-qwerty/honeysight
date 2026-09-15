@@ -60,8 +60,8 @@ sqlite3 data/honeysight.db \
 Слушатели (приманки):               Конвейер:                  Приёмники:
 ┌─ web  (HTTP-приманки)     ─┐      захват → нормализация →    ┌─ SQLite (события)
 ├─ ssh  (OpenSSH + шелл)    ─┼──► Bus ──► детекция (YAML-правила) ┼─ структурный лог
-└─ redis (M4)               ─┘       → скор → трекер (окно,   └─ экспорт IOC (M3)
-                                    карантин/tarpit)                JSON + STIX 2.1
+└─ redis (M4)               ─┘       → скор → трекер (окно,   └─ экспорт IOC:
+                                    карантин/tarpit)                JSON + STIX 2.1 → webhook
 ```
 
 Ключевые принципы:
@@ -124,6 +124,31 @@ rules/                 правила детекции по умолчанию
 (у атакующего, в дампе, на пастebin) появилось значение токена — источник
 подтверждён: это был он.
 
+### Экспорт IOC (STIX 2.1 + webhook)
+
+События пакетами уходят на ваш webhook (TI-платформа, MISP, Elastic — что
+угодно, что принимает POST JSON). Каждый батч — один payload:
+
+- `events[]` — чистая JSON-схема: протокол, IP, действие, скор, категории,
+  canary-id, JA3/отпечаток клиента, детали + `geo`/`asn` (если включено);
+- `stix_bundle` — валидный STIX 2.1 bundle: по **индикатору на уникальный
+  IP** (паттерн `ipv4-addr:value`, метки-категории, макс. скор, окно
+  first/last seen, canaries и fingerprints в `x_honeysight`), по **tool** на
+  каждый замеченный сканер (sqlmap, nikto, nmap, ...), и `report`,
+  связывающий всё в батче.
+
+Параметры: `batch_size` (по умолчанию 50), `flush_interval` (30s),
+`retries` (3, backoff 1s/5s/25s). При недоступности вебхука батч
+повторяется и затем отбрасывается с ошибкой в лог — honeypot никогда не
+зависает из-за экспортa (fail-open).
+
+### Обогащение (GeoIP/ASN)
+
+Опционально: локальная MaxMind-база (`enrich.geoip_db`; GeoLite2-City
+покрывает страну, город и ASN одним файлом). Чтение только из памяти,
+внешних обращений honeysight **никуда** не делает — файл базы кладёте сами
+(бесплатно: аккаунт на dev.maxmind.com).
+
 ### SSH-приманка
 
 Слушатель `:2222` выдаёт себя за `OpenSSH_8.9p1 Ubuntu`. Любые креденшелы
@@ -181,6 +206,11 @@ Severity: `low` 1–24 · `medium` 25–49 · `high` 50–79 · `critical` 80–
 | `listen.ssh` | `:2222` | Адрес SSH-слушателя (пусто = выключить) |
 | `tls_cert_dir` | `data/tls` | Каталог сертификата (создаётся автоматически) |
 | `ssh_host_key_dir` | `data/ssh` | Каталог SSH host-ключа (создаётся автоматически) |
+| `export.webhook_url` | `""` | URL вебхука для IOC (пусто = выключить) |
+| `export.batch_size` | `50` | Размер батча |
+| `export.flush_interval` | `30s` | Период выгрузки остатка |
+| `export.retries` | `3` | Попыток на батч (backoff 1/5/25s) |
+| `enrich.geoip_db` | `""` | Путь к MaxMind .mmdb (пусто = без обогащения) |
 | `storage.sqlite_path` | `data/honeysight.db` | Файл БД (canaries — в `<path>-canaries.db`) |
 | `rules.path` | `rules/default.yml` | Файл правил |
 | `block_threshold` | `100` | Окно-скор, срабатывающий карантин |

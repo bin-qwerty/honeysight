@@ -9,6 +9,21 @@ tls_cert_dir: "data/tls"
 # Directory for the auto-generated SSH host key.
 ssh_host_key_dir: "data/ssh"
 
+# IOC export: batch delivery of events (clean JSON + STIX 2.1 bundle) to
+# your TI platform's webhook. Empty webhook_url = export disabled.
+export:
+  webhook_url: ""          # e.g. "http://ti.internal:9200/honeysight"
+  batch_size: 50           # flush when this many events are buffered
+  flush_interval: 30s      # ... or at least this often
+  timeout: 10s             # per-HTTP-request timeout
+  retries: 3               # attempts per batch (backoff 1s/5s/25s)
+
+# Local enrichment: a MaxMind .mmdb database (GeoLite2-City covers
+# country/city/ASN in one file). Honeysight never phones home; the file
+# is your responsibility. Empty = no enrichment.
+enrich:
+  geoip_db: ""             # e.g. "data/GeoLite2-City.mmdb"
+
 storage:
   sqlite_path: "data/honeysight.db"   # canary tokens live in <path>-canaries.db
 
