@@ -5,7 +5,7 @@ builds:
   - main: ./cmd/honeysight
     binary: honeysight
     env:
-      CGO_ENABLED: "0"
+      - CGO_ENABLED=0
     flags:
       - -trimpath
     ldflags:
@@ -19,9 +19,8 @@ archives:
       - README.md
       - README.en.md
       - config.example.yml
-      - rules/
-      - extra_files:
-          - docs/
+      - rules/**
+      - docs/**
 
 checksum:
   name_template: "checksums.txt"
