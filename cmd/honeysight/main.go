@@ -77,11 +77,21 @@ func (a trackerSub) Handle(e core.Event) {
 	}
 }
 
+// version is injected at build time: -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	configPath := flag.String("config", "config.yml", "path to YAML config")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	if *showVersion {
+		fmt.Println("honeysight", version)
+		return
+	}
+	log.Info("honeysight starting", "version", version)
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {

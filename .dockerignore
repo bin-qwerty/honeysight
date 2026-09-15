@@ -1,0 +1,12 @@
+.git
+.github
+data
+docs
+hack
+*_test.go
+honeysight
+server.log
+server.pid
+*.md
+LICENSE
+Makefile

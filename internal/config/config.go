@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -70,9 +71,15 @@ func Load(path string) (*Config, error) {
 	c.Listen.HTTPS = ":8443"
 	c.Listen.SSH = ":2222"
 	c.Listen.Redis = ":6380"
-	c.TLSCertDir = "data/tls"
-	c.SSHHostKeyDir = "data/ssh"
-	c.Storage.SQLitePath = "data/honeysight.db"
+	// Data directory: HONEYSIGHT_DATA_DIR (set by the Docker image to
+	// /data) or ./data. YAML values below always win over the defaults.
+	dataDir := os.Getenv("HONEYSIGHT_DATA_DIR")
+	if dataDir == "" {
+		dataDir = "data"
+	}
+	c.TLSCertDir = filepath.Join(dataDir, "tls")
+	c.SSHHostKeyDir = filepath.Join(dataDir, "ssh")
+	c.Storage.SQLitePath = filepath.Join(dataDir, "honeysight.db")
 	c.Rules.Path = "rules/default.yml"
 	c.BlockThreshold = 100
 	c.Window = 5 * time.Minute

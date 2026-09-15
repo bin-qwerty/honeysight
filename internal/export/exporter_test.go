@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -139,10 +140,9 @@ func TestExporterDropsOnPermanentFailure(t *testing.T) {
 }
 
 func TestExporterRetrySucceeds(t *testing.T) {
-	var calls int
+	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls++
-		if calls == 1 {
+		if calls.Add(1) == 1 {
 			http.Error(w, "busy", http.StatusServiceUnavailable)
 			return
 		}
@@ -158,14 +158,14 @@ func TestExporterRetrySucceeds(t *testing.T) {
 	// The first retry sleeps 1s; allow time for attempt 2.
 	go exp.Handle(ev("1.2.3.4", "request", "", 0))
 	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && calls < 2 {
+	for time.Now().Before(deadline) && calls.Load() < 2 {
 		time.Sleep(20 * time.Millisecond)
 	}
 	if exp.Dropped() != 0 {
 		t.Fatalf("dropped = %d, want 0 (retry should succeed)", exp.Dropped())
 	}
-	if calls != 2 {
-		t.Fatalf("calls = %d, want 2", calls)
+	if calls.Load() != 2 {
+		t.Fatalf("calls = %d, want 2", calls.Load())
 	}
 }
 

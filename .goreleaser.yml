@@ -1,0 +1,38 @@
+version: 2
+
+project_name: honeysight
+builds:
+  - main: ./cmd/honeysight
+    binary: honeysight
+    env:
+      CGO_ENABLED: "0"
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{.Tag}}
+
+archives:
+  - format: tar
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+      - README.en.md
+      - config.example.yml
+      - rules/
+      - extra_files:
+          - docs/
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+release:
+  github:
+    owner: bin-qwerty

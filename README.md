@@ -1,5 +1,9 @@
 # Honeysight
 
+![Go version](https://img.shields.io/badge/go-1.22%2B-00ADD8)
+![CI](https://github.com/bin-qwerty/honeysight/actions/workflows/ci.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+
 Многопротокольный deception-хонипот для исследования угроз и питания threat intelligence.
 
 Honeysight выглядит как настоящая, слегка уязвимая цель — корпоративный портал,
@@ -239,6 +243,39 @@ Severity: `low` 1–24 · `medium` 25–49 · `high` 50–79 · `critical` 80–
 | `tarpit` | `1.5s` | Задержка ответа карантинным источникам |
 | `trusted_proxies` | — | Прокси, которым доверяются заголовки источника |
 
+Каталог данных по умолчанию `data/` (SQLite, TLS-сертификат, SSH host-ключ)
+можно переместить переменной окружения `HONEYSIGHT_DATA_DIR`
+(в Docker-образе это `/data`). Флаг `--version` печатает версию сборки.
+
+## Документация
+
+- [**docs/deployment.md**](docs/deployment.md) — деплой на VPS: systemd и
+  Docker, фаервол, GeoIP, боевой конфиг.
+- [**docs/export.md**](docs/export.md) — схема webhook-пакета, STIX-маппинг,
+  пример приёмника, fail-open поведение.
+- [**docs/security.md**](docs/security.md) — безопасная эксплуатация,
+  юридическая оговорка, что делать при canary-hit.
+
+### Docker
+
+```bash
+docker run -d --name honeysight --restart unless-stopped \
+  -p 8080:8080 -p 8443:8443 -p 2222:2222 -p 6380:6380 \
+  -v /opt/honeysight/etc/config.yml:/etc/honeysight/config.yml:ro \
+  -v /opt/honeysight/etc/rules.yml:/etc/honeysight/rules.yml:ro \
+  -v /opt/honeysight/data:/data \
+  ghcr.io/bin-qwerty/honeysight:latest
+```
+
+Образ на `gcr.io/distroless/static` (без shell), работает от nonroot.
+Данные (SQLite, TLS-сертификат, SSH host-ключ) — в томе `/data`.
+Подробности — в [docs/deployment.md](docs/deployment.md).
+
 ## Лицензия
 
 MIT — см. [LICENSE](LICENSE).
+
+Зависимости (все совместимы с MIT): `gopkg.in/yaml.v3` (Apache-2.0),
+`modernc.org/sqlite` (MIT, чистый Go — cgo не нужен),
+`golang.org/x/crypto` (BSD-3-Clause), `github.com/oschwald/maxminddb-golang`
+(ISC, только при включённом GeoIP-обогащении).

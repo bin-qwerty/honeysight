@@ -1,5 +1,9 @@
 # Honeysight
 
+![Go version](https://img.shields.io/badge/go-1.22%2B-00ADD8)
+![CI](https://github.com/bin-qwerty/honeysight/actions/workflows/ci.yml/badge.svg)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+
 Multi-protocol deception honeypot for threat intelligence research.
 
 [Русскоязычная версия README](README.md)
@@ -153,6 +157,35 @@ internal/decoy/redis/  Redis 7.2: AUTH capture + fake keyspace with canaries (RE
 rules/                 default signature rules
 ```
 
+## Documentation
+
+- [**docs/deployment.md**](docs/deployment.md) — VPS deployment: systemd and
+  Docker, firewall, GeoIP, production config.
+- [**docs/export.md**](docs/export.md) — webhook payload schema, STIX mapping,
+  a sample receiver, fail-open behaviour.
+- [**docs/security.md**](docs/security.md) — safe operation, legal note, what
+to do on a canary hit.
+
+### Docker
+
+```bash
+docker run -d --name honeysight --restart unless-stopped \
+  -p 8080:8080 -p 8443:8443 -p 2222:2222 -p 6380:6380 \
+  -v /opt/honeysight/etc/config.yml:/etc/honeysight/config.yml:ro \
+  -v /opt/honeysight/etc/rules.yml:/etc/honeysight/rules.yml:ro \
+  -v /opt/honeysight/data:/data \
+  ghcr.io/bin-qwerty/honeysight:latest
+```
+
+The image is based on `gcr.io/distroless/static` (no shell) and runs as
+nonroot. Data (SQLite, TLS cert, SSH host key) lives in the `/data` volume.
+See [docs/deployment.md](docs/deployment.md) for details.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+Dependencies (all MIT-compatible): `gopkg.in/yaml.v3` (Apache-2.0),
+`modernc.org/sqlite` (MIT, pure Go — no cgo), `golang.org/x/crypto`
+(BSD-3-Clause), `github.com/oschwald/maxminddb-golang` (ISC, only when
+GeoIP enrichment is enabled).
