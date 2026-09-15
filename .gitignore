@@ -13,3 +13,4 @@ config.yml
 .idea/
 .vscode/
 .DS_Store
+server.pid
