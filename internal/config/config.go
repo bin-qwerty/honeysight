@@ -12,9 +12,12 @@ import (
 // Config is the full runtime configuration.
 type Config struct {
 	Listen struct {
-		HTTP string `yaml:"http"`
+		HTTP  string `yaml:"http"`
+		HTTPS string `yaml:"https"` // empty = TLS listener disabled
 	} `yaml:"listen"`
-	Storage struct {
+	// TLSCertDir holds the (auto-generated) self-signed certificate.
+	TLSCertDir string `yaml:"tls_cert_dir"`
+	Storage    struct {
 		SQLitePath string `yaml:"sqlite_path"`
 	} `yaml:"storage"`
 	Rules struct {
@@ -49,6 +52,8 @@ func Load(path string) (*Config, error) {
 
 	c := &Config{}
 	c.Listen.HTTP = ":8080"
+	c.Listen.HTTPS = ":8443"
+	c.TLSCertDir = "data/tls"
 	c.Storage.SQLitePath = "data/honeysight.db"
 	c.Rules.Path = "rules/default.yml"
 	c.BlockThreshold = 100

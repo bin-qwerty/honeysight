@@ -26,6 +26,8 @@ curl -s localhost:8080/                 # looks like a corporate portal
 curl -s "localhost:8080/?id=1' OR 1=1--"
 curl -s localhost:8080/.env             # fake but convincing
 curl -s -A "sqlmap/1.8" localhost:8080/
+curl -s -c jar -L -d "user=admin&pass=x" localhost:8080/admin/login  # fake login -> data dashboard
+curl -sk -L -d "user=root&pass=y" https://localhost:8443/admin/login # over TLS (JA3 captured)
 ```
 
 Events land in `data/honeysight.db` (SQLite):
@@ -45,9 +47,31 @@ Listeners (deception):                Pipeline:                 Sinks:
 ```
 
 - **Single Go binary**, SQLite by default (zero-config), Postgres later.
+- **TLS listener with JA3**: the ClientHello is parsed before the handshake,
+  so every event over TLS carries the client's JA3 fingerprint.
+- **Canary tokens**: the admin dashboard plants unique fake credentials per
+  source IP — if one shows up in the attacker's world, the source is confirmed.
 - **Rules in YAML** (`rules/`), hot-reloadable, with a regression payload corpus.
 - **Quarantine is local**: the honeypot only changes how it answers its own
   traffic (slow 403 tarpit); it never touches the attacker's host.
+
+### Decoy surface
+
+| Surface | What the attacker sees |
+|---|---|
+| `/` | "Corporate portal" with links to admin, CMS, phpMyAdmin |
+| `/.env` | "Leaked" config with DB/Redis/AWS secrets (all fake) |
+| `/.git/config` | Fake git repository |
+| `/admin`, `/wp-login.php`, `/phpmyadmin` | Login forms |
+| `/admin/dashboard` (after "login") | Admin console: users, DB connections, cloud keys, internal hosts |
+| `Host: 169.254.169.254`, `/latest/meta-data/` | Cloud metadata service |
+
+"Login" always succeeds. The dashboard is a honeypot jackpot: every
+credential-looking value in it is a **canary token unique to that source IP**
+(DB password, API key, AWS key pair, admin username, internal IP). Sets live
+for an hour, then rotate. All tokens are persisted in SQLite
+(`<db>-canaries.db`) for later "canary hit" correlation. The session cookie
+value is the canary set id itself.
 
 ## Layout
 
@@ -58,7 +82,10 @@ internal/config/       YAML config
 internal/detect/       signature engine (pure, tested) + YAML rules
 internal/track/        rolling per-source scoring + quarantine
 internal/store/        storage interfaces + SQLite
-internal/decoy/web/    HTTP deception listener + bait
+internal/canary/       canary tokens: generation, registry, SQLite
+internal/fingerprint/  ClientHello parsing, JA3, TLS listener
+internal/tlsutil/      self-signed certificate auto-generation
+internal/decoy/web/    HTTP deception listener + bait (portal, admin, metadata)
 rules/                 default signature rules
 ```
 

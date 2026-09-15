@@ -1,9 +1,13 @@
 # Honeysight configuration (copy to config.yml and adjust).
 listen:
   http: ":8080"
+  https: ":8443"      # TLS decoy: auto-generated self-signed cert + JA3 capture
+
+# Directory for the auto-generated self-signed TLS certificate.
+tls_cert_dir: "data/tls"
 
 storage:
-  sqlite_path: "data/honeysight.db"
+  sqlite_path: "data/honeysight.db"   # canary tokens live in <path>-canaries.db
 
 rules:
   path: "rules/default.yml"

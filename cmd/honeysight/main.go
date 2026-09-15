@@ -4,9 +4,11 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,12 +16,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/honeysight/honeysight/internal/canary"
 	"github.com/honeysight/honeysight/internal/config"
 	"github.com/honeysight/honeysight/internal/core"
 	"github.com/honeysight/honeysight/internal/decoy/web"
 	"github.com/honeysight/honeysight/internal/detect"
+	"github.com/honeysight/honeysight/internal/fingerprint"
 	"github.com/honeysight/honeysight/internal/store"
 	"github.com/honeysight/honeysight/internal/store/sqlite"
+	"github.com/honeysight/honeysight/internal/tlsutil"
 	"github.com/honeysight/honeysight/internal/track"
 )
 
@@ -45,7 +50,8 @@ func (a logSub) Handle(e core.Event) {
 	a.log.Info("event",
 		"id", e.ID, "proto", e.Protocol, "ip", e.SourceIP, "action", e.Action,
 		"score", e.Score, "severity", e.Severity,
-		"categories", strings.Join(e.Categories, ","), "details", e.Details,
+		"categories", strings.Join(e.Categories, ","),
+		"fingerprint", e.Fingerprint, "canary", e.CanaryID, "details", e.Details,
 	)
 }
 
@@ -86,6 +92,12 @@ func main() {
 		fatal(log, "store", err)
 	}
 
+	canaryStore, err := canary.NewSQLiteStore(cfg.Storage.SQLitePath + "-canaries.db")
+	if err != nil {
+		fatal(log, "canary store", err)
+	}
+	canaries := canary.New(canaryStore, time.Hour)
+
 	tracker := track.New(cfg.BlockThreshold, cfg.Window, cfg.BlockTTL)
 	bus := core.NewBus(0, log,
 		storeSub{log: log, s: st},
@@ -94,15 +106,38 @@ func main() {
 	)
 	bus.Start()
 
-	handler := web.New(log, bus, tracker, engine, cfg.TrustedProxies, cfg.Tarpit)
+	handler := web.New(log, bus, tracker, engine, canaries, cfg.TrustedProxies, cfg.Tarpit)
 	srv := &http.Server{
 		Addr:              cfg.Listen.HTTP,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	errCh := make(chan error, 1)
+	errCh := make(chan error, 2)
 	go func() { errCh <- srv.ListenAndServe() }()
+
+	// Optional TLS listener: same handler, plus ClientHello (JA3) capture.
+	if cfg.Listen.HTTPS != "" {
+		certFile, keyFile, err := tlsutil.EnsureCert(cfg.TLSCertDir)
+		if err != nil {
+			fatal(log, "tls cert", err)
+		}
+		pair, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			fatal(log, "tls cert", err)
+		}
+		tlsCfg := &tls.Config{Certificates: []tls.Certificate{pair}, MinVersion: tls.VersionTLS12}
+		ln, err := net.Listen("tcp", cfg.Listen.HTTPS)
+		if err != nil {
+			fatal(log, "https listen", err)
+		}
+		log.Info("https decoy listening", "addr", cfg.Listen.HTTPS, "cert", certFile)
+		go func() {
+			errCh <- fingerprint.Serve(ln, tlsCfg, func(h *fingerprint.Hello) http.Handler {
+				return fingerprint.Decorate(handler, h)
+			})
+		}()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

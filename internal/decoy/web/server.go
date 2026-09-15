@@ -12,8 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/honeysight/honeysight/internal/canary"
 	"github.com/honeysight/honeysight/internal/core"
 	"github.com/honeysight/honeysight/internal/detect"
+	"github.com/honeysight/honeysight/internal/fingerprint"
 	"github.com/honeysight/honeysight/internal/track"
 )
 
@@ -22,17 +24,19 @@ const maxBody = 64 << 10
 
 // Server is the HTTP deception listener.
 type Server struct {
-	log     *slog.Logger
-	bus     *core.Bus
-	tracker *track.Tracker
-	engine  *detect.Engine
-	tarpit  time.Duration
-	trusted map[string]bool
+	log      *slog.Logger
+	bus      *core.Bus
+	tracker  *track.Tracker
+	engine   *detect.Engine
+	canaries *canary.Registry
+	tarpit   time.Duration
+	trusted  map[string]bool
 }
 
 // New builds the listener. trustedProxies are peer addresses allowed to
-// supply X-Real-IP / X-Forwarded-For.
-func New(log *slog.Logger, bus *core.Bus, tracker *track.Tracker, engine *detect.Engine, trustedProxies []string, tarpit time.Duration) *Server {
+// supply X-Real-IP / X-Forwarded-For. canaries may be nil (no canary
+// planting, the admin dashboard falls back to static values).
+func New(log *slog.Logger, bus *core.Bus, tracker *track.Tracker, engine *detect.Engine, canaries *canary.Registry, trustedProxies []string, tarpit time.Duration) *Server {
 	trusted := make(map[string]bool, len(trustedProxies))
 	for _, p := range trustedProxies {
 		trusted[p] = true
@@ -41,8 +45,18 @@ func New(log *slog.Logger, bus *core.Bus, tracker *track.Tracker, engine *detect
 		tarpit = 1500 * time.Millisecond
 	}
 	return &Server{
-		log: log, bus: bus, tracker: tracker, engine: engine,
+		log: log, bus: bus, tracker: tracker, engine: engine, canaries: canaries,
 		tarpit: tarpit, trusted: trusted,
+	}
+}
+
+// setFingerprint records the TLS ClientHello (JA3) on the event, if the
+// connection came in over the TLS listener.
+func (s *Server) setFingerprint(ev *core.Event, r *http.Request) {
+	if h := fingerprint.HelloFrom(r); h != nil {
+		ev.Fingerprint = h.JA3()
+	} else {
+		ev.Fingerprint = "http/1.1"
 	}
 }
 
@@ -77,14 +91,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	path := r.URL.Path
+
+	// Admin login first: it must read the raw form body itself, before
+	// the generic capture below would consume it.
+	if path == "/admin/login" && r.Method == http.MethodPost {
+		s.handleLogin(w, r, ip, port)
+		return
+	}
+
 	bodyBytes, _ := io.ReadAll(io.LimitReader(r.Body, maxBody))
 	body := string(bodyBytes)
-	path := r.URL.Path
 	query := r.URL.RawQuery
 	ua := r.UserAgent()
 
 	ev := core.NewEvent("http", ip, "request")
 	ev.SourcePort = port
+	s.setFingerprint(&ev, r)
 	ev.Details["method"] = r.Method
 	ev.Details["path"] = path
 	if query != "" {
@@ -97,6 +120,24 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	det := s.engine.Analyze(detect.Fields{Path: path, Query: query, Body: body, UserAgent: ua})
 	ev.Enrich(det.Score, det.Categories)
+
+	// Admin dashboard pages plant canary tokens and mark the event with
+	// the canary set; without a session cookie the login page is shown.
+	if strings.HasPrefix(path, "/admin/") && r.Method == http.MethodGet {
+		if c, err := r.Cookie(adminCookie); err == nil && c.Value != "" && s.canaries != nil {
+			set := s.canaries.SetFor(ip, path)
+			ev.CanaryID = set.ID
+			s.bus.Publish(ev)
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write(renderDashboard(set))
+			return
+		}
+		s.bus.Publish(ev)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(fakeLogin))
+		return
+	}
+
 	s.bus.Publish(ev) // tracker subscriber records the score centrally
 
 	if det.IsMalicious() {
@@ -113,4 +154,43 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Error(w, "404 Not Found", http.StatusNotFound)
+}
+
+// adminCookie is set after a (fake) successful login. Its value is the
+// canary set id — the cookie itself is a canary.
+const adminCookie = "ns_admin"
+
+// handleLogin serves the fake IDaaS login: any credentials "work".
+// The attempt (with credentials) is published, a canary cookie is set,
+// and the client is sent to the data dashboard.
+func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request, ip string, port int) {
+	_ = r.ParseForm()
+	user := r.FormValue("user")
+	pass := r.FormValue("pass")
+
+	ev := core.NewEvent("http", ip, "login")
+	ev.SourcePort = port
+	s.setFingerprint(&ev, r)
+	ev.Details["user"] = user
+	ev.Details["pass"] = pass
+	ev.Details["user_agent"] = r.UserAgent()
+	det := s.engine.Analyze(detect.Fields{UserAgent: r.UserAgent(), Body: user + " " + pass})
+	ev.Enrich(det.Score, det.Categories)
+
+	var cookie *http.Cookie
+	if s.canaries != nil {
+		set := s.canaries.SetFor(ip, "/admin/login")
+		ev.CanaryID = set.ID
+		cookie = &http.Cookie{
+			Name: adminCookie, Value: set.ID,
+			Path: "/", MaxAge: 12 * 3600, HttpOnly: true,
+		}
+	}
+
+	s.bus.Publish(ev)
+	s.log.Warn("admin login", "id", ev.ID, "ip", ip, "user", user, "canary", ev.CanaryID)
+	if cookie != nil {
+		http.SetCookie(w, cookie)
+	}
+	http.Redirect(w, r, "/admin/dashboard", http.StatusFound)
 }

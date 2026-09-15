@@ -17,11 +17,11 @@ type ruleFile struct {
 }
 
 type rawRule struct {
-	ID       string   `yaml:"id"`
-	Category string   `yaml:"category"`
-	Weight   int      `yaml:"weight"`
-	Patterns []string `yaml:"patterns"` // matched against path+query+body
-	UserAgent string  `yaml:"user_agent"` // matched against the User-Agent header
+	ID        string   `yaml:"id"`
+	Category  string   `yaml:"category"`
+	Weight    int      `yaml:"weight"`
+	Patterns  []string `yaml:"patterns"`   // matched against path+query+body
+	UserAgent string   `yaml:"user_agent"` // matched against the User-Agent header
 }
 
 type rule struct {
