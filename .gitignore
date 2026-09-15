@@ -14,3 +14,4 @@ config.yml
 .vscode/
 .DS_Store
 server.pid
+server.log
