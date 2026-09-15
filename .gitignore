@@ -1,0 +1,15 @@
+# Build artifacts
+/honeysight
+bin/
+
+# Local data
+data/
+*.db
+*.db-*
+config.yml
+.env
+
+# Editor/OS
+.idea/
+.vscode/
+.DS_Store

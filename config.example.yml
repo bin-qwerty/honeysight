@@ -1,0 +1,21 @@
+# Honeysight configuration (copy to config.yml and adjust).
+listen:
+  http: ":8080"
+
+storage:
+  sqlite_path: "data/honeysight.db"
+
+rules:
+  path: "rules/default.yml"
+
+# Rolling per-source scoring: a source whose windowed score reaches
+# block_threshold is quarantined for block_ttl and tarpitted (slow 403).
+block_threshold: 100
+window: 5m
+block_ttl: 10m
+tarpit: 1.5s
+
+# Peer addresses allowed to set X-Real-IP / X-Forwarded-For.
+# Leave empty when Honeysight listens directly on the public interface.
+# trusted_proxies:
+#   - "127.0.0.1"

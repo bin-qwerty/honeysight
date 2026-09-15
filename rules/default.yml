@@ -1,0 +1,113 @@
+# Honeysight default signature rules.
+#
+# weight: contribution to the 0-100 threat score when the rule's category
+# matches (each category is counted once per request, total capped at 100).
+# patterns: regexps matched against path + query + body (raw and up to two
+# rounds of percent-decoding). user_agent: regexp matched against the
+# User-Agent header.
+rules:
+  - id: sqli
+    category: sql-injection
+    weight: 40
+    patterns:
+      - '\bunion\b[\s\S]+\bselect\b'
+      - '\bor\b\s+1\s*=\s*1'
+      - '[\x27]\s*or\s*[\x27]'
+      - ';\s*--'
+      - 'information_schema'
+      - 'xp_cmdshell'
+      - '\bsleep\s*\('
+      - '\bbenchmark\s*\('
+      - '\bpg_sleep\s*\('
+      - 'waitfor\s+delay'
+
+  - id: xss
+    category: xss
+    weight: 25
+    patterns:
+      - '<script\b'
+      - '</script>'
+      - 'onerror\s*='
+      - 'onload\s*='
+      - 'javascript:'
+      - 'document\.cookie'
+      - 'alert\s*\('
+
+  - id: traversal
+    category: path-traversal
+    weight: 35
+    patterns:
+      - '\.\./'
+      - '\.\.\\'
+      - '%2e%2e[%/\\]'
+      - '/etc/passwd'
+      - '/proc/self/environ'
+      - 'boot\.ini'
+      - 'win\.ini'
+      - 'file://'
+
+  - id: rce
+    category: command-injection
+    weight: 50
+    patterns:
+      - '[;|`]|\$\(|&&|\|\|\)\s*(cat|ls|id|whoami|uname|wget|curl|\bnc\b|ncat|bash|/bin/sh|powershell|certutil|ping\s+-c)\b'
+
+  - id: log4shell
+    category: log4shell
+    weight: 50
+    patterns:
+      - '\$\{\s*jndi\s*:\s*(ldap|ldaps|rmi|dns|iiop)\s*:'
+
+  - id: webshell
+    category: webshell
+    weight: 45
+    patterns:
+      - 'eval\s*\('
+      - 'base64_decode\s*\('
+      - 'system\s*\('
+      - 'passthru\s*\('
+      - 'shell_exec\s*\('
+      - 'proc_open\s*\('
+      - 'assert\s*\(\s*\$'
+
+  - id: ssti
+    category: template-injection
+    weight: 30
+    patterns:
+      - '\{\{.*?\}\}'
+      - '\$\{.*?\}'
+      - '<%=.*?%>'
+      - '#\{.*?\}'
+
+  - id: credential
+    category: credential-access
+    weight: 30
+    patterns:
+      - '/\.env\b'
+      - '/\.git/'
+      - '/\.aws/'
+      - '/\.ssh/'
+      - 'id_rsa\b'
+      - 'wp-config\.php'
+      - 'config\.php\b'
+      - 'credentials'
+      - '/\.npmrc'
+      - '/\.htpasswd'
+
+  - id: scanner-paths
+    category: recon-scanner
+    weight: 20
+    patterns:
+      - 'sqlmap|nikto|masscan|dirbuster|gobuster|wpscan|acunetix|nuclei|zgrab|nessus|whatweb'
+      - '/wp-login\.php'
+      - '/phpmyadmin'
+      - '/xmlrpc\.php'
+      - '/actuator/'
+      - '/solr/'
+      - '/cgi-bin/'
+      - '/vendor/phpunit'
+
+  - id: scanner-ua
+    category: recon-scanner
+    weight: 20
+    user_agent: 'sqlmap|nikto|nmap|masscan|dirbuster|gobuster|wpscan|acunetix|nuclei|zgrab|nessus|whatweb|python-requests|go-http-client|libwww-perl|curl/|wget/'
