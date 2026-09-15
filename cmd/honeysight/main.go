@@ -19,6 +19,7 @@ import (
 	"github.com/honeysight/honeysight/internal/canary"
 	"github.com/honeysight/honeysight/internal/config"
 	"github.com/honeysight/honeysight/internal/core"
+	decoyredis "github.com/honeysight/honeysight/internal/decoy/redis"
 	decoyssh "github.com/honeysight/honeysight/internal/decoy/ssh"
 	"github.com/honeysight/honeysight/internal/decoy/web"
 	"github.com/honeysight/honeysight/internal/detect"
@@ -152,8 +153,14 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	errCh := make(chan error, 3)
+	errCh := make(chan error, 4)
 	go func() { errCh <- srv.ListenAndServe() }()
+
+	// Optional Redis listener: fake Redis 7.2 with a canary-seeded keyspace.
+	if cfg.Listen.Redis != "" {
+		redisSrv := decoyredis.New(log, bus, tracker, engine, canaries, cfg.Tarpit)
+		go func() { errCh <- redisSrv.ListenAndServe(cfg.Listen.Redis) }()
+	}
 
 	// Optional SSH listener: fake OpenSSH server with a canary-seeded shell.
 	if cfg.Listen.SSH != "" {

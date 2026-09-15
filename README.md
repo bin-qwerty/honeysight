@@ -58,10 +58,10 @@ sqlite3 data/honeysight.db \
 
 ```
 Слушатели (приманки):               Конвейер:                  Приёмники:
-┌─ web  (HTTP-приманки)     ─┐      захват → нормализация →    ┌─ SQLite (события)
-├─ ssh  (OpenSSH + шелл)    ─┼──► Bus ──► детекция (YAML-правила) ┼─ структурный лог
-└─ redis (M4)               ─┘       → скор → трекер (окно,   └─ экспорт IOC:
-                                    карантин/tarpit)                JSON + STIX 2.1 → webhook
+┌─ web   (HTTP-приманки)    ─┐      захват → нормализация →     ┌─ SQLite (события)
+├─ ssh   (OpenSSH + шелл)   ─┼──► Bus ──► детекция (YAML-правила) ┼─ структурный лог
+├─ redis (Redis 7.2 + keys) ─┼──►        → скор → трекер (окно,  └─ экспорт IOC:
+└────────────────────────────┘       карантин/tarpit)              JSON + STIX 2.1 → webhook
 ```
 
 Ключевые принципы:
@@ -91,6 +91,7 @@ internal/fingerprint/  разбор ClientHello, JA3, TLS-слушатель
 internal/tlsutil/      самоподписанный сертификат (автогенерация)
 internal/decoy/web/    HTTP-слушатель + приманки (портал, админка, metadata)
 internal/decoy/ssh/    OpenSSH-сервер: захват логинов + fake-шелл с canaries
+internal/decoy/redis/  Redis 7.2: захват AUTH + fake-keyspace с canaries (RESP)
 rules/                 правила детекции по умолчанию
 ```
 
@@ -149,6 +150,24 @@ rules/                 правила детекции по умолчанию
 внешних обращений honeysight **никуда** не делает — файл базы кладёте сами
 (бесплатно: аккаунт на dev.maxmind.com).
 
+### Redis-приманка
+
+Слушатель `:6380` (на VPS обычно `:6379`) выдаёт себя за Redis 7.2.4. `AUTH`
+принимает **любые** креденшелы (и `AUTH pass`, и `AUTH user pass`) и всегда
+отвечает `+OK` — сами креденшелы фиксируются в событии `action=auth`.
+
+Keyspace засевлен canary-набором источника (общий реестр с web и SSH):
+`northwind:api:secret`, `northwind:db:password`, `northwind:db:host`,
+`northwind:aws:*`, `northwind:admin:username`, `northwind:gateway:internal`.
+`PING/ECHO/SELECT/INFO/DBSIZE/KEYS/SCAN/GET/MGET/EXISTS/TTL/TYPE/STRLEN/
+SET/CONFIG/CLIENT` отвечают правдоподобно; `FLUSHALL` и `SLAVEOF` «работают»,
+`SHUTDOWN` не роняет honeypot.
+
+Каждая команда — событие `action=cmd`: правила `redis-recon` (KEYS *, INFO,
+CONFIG GET, ...) и `redis-abuse` (FLUSHALL, CONFIG SET, SLAVEOF, EVAL, ...)
+подсвечивают попытки эксплуатации. Карантин общий: зачаренный источник
+получает ответы с tarpit-задержкой.
+
 ### SSH-приманка
 
 Слушатель `:2222` выдаёт себя за `OpenSSH_8.9p1 Ubuntu`. Любые креденшелы
@@ -204,6 +223,7 @@ Severity: `low` 1–24 · `medium` 25–49 · `high` 50–79 · `critical` 80–
 | `listen.http` | `:8080` | Адрес HTTP-слушателя |
 | `listen.https` | `:8443` | Адрес TLS-слушателя (пусто = выключить) |
 | `listen.ssh` | `:2222` | Адрес SSH-слушателя (пусто = выключить) |
+| `listen.redis` | `:6380` | Адрес Redis-слушателя (пусто = выключить) |
 | `tls_cert_dir` | `data/tls` | Каталог сертификата (создаётся автоматически) |
 | `ssh_host_key_dir` | `data/ssh` | Каталог SSH host-ключа (создаётся автоматически) |
 | `export.webhook_url` | `""` | URL вебхука для IOC (пусто = выключить) |

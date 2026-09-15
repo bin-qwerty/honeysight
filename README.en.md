@@ -41,10 +41,10 @@ sqlite3 data/honeysight.db "SELECT ts, source_ip, score, severity, categories, a
 
 ```
 Listeners (deception):                Pipeline:                 Sinks:
-┌─ web (HTTP decoy)        ─┐        capture → normalize →     ┌─ SQLite (events)
-├─ ssh (OpenSSH + shell)   ─┼──► Bus ──► detect (YAML rules) ──┼─ structured log
-└─ redis (M4)              ─┘        → score → track (window,  └─ IOC export (M3)
-                                     quarantine/tarpit)             JSON + STIX 2.1
+┌─ web   (HTTP decoy)      ─┐        capture → normalize →     ┌─ SQLite (events)
+├─ ssh   (OpenSSH + shell) ─┼──► Bus ──► detect (YAML rules) ──┼─ structured log
+├─ redis (Redis 7.2 + keys) ┼──►        → score → track (window, └─ IOC export:
+└───────────────────────────┘        quarantine/tarpit)            JSON + STIX 2.1 → webhook
 ```
 
 - **Single Go binary**, SQLite by default (zero-config), Postgres later.
@@ -73,6 +73,50 @@ credential-looking value in it is a **canary token unique to that source IP**
 for an hour, then rotate. All tokens are persisted in SQLite
 (`<db>-canaries.db`) for later "canary hit" correlation. The session cookie
 value is the canary set id itself.
+
+### IOC export (STIX 2.1 + webhook)
+
+Events are shipped in batches to your webhook (TI platform, MISP, Elastic —
+anything that accepts a POST JSON). Each batch is one payload:
+
+- `events[]` — clean JSON schema: protocol, IP, action, score, categories,
+  canary id, client JA3/fingerprint, details, plus `geo`/`asn` when enabled;
+- `stix_bundle` — a valid STIX 2.1 bundle: one **indicator per unique
+  source IP** (`ipv4-addr:value` pattern, category labels, max score,
+  first/last seen window, canaries and fingerprints under `x_honeysight`),
+  one **tool** per observed scanner (sqlmap, nikto, nmap, ...), and a
+  **report** tying the batch together.
+
+Tunables: `batch_size` (default 50), `flush_interval` (30s), `retries` (3,
+backoff 1s/5s/25s). When the webhook is unreachable the batch is retried and
+then dropped with an error log — the honeypot never stalls because of export
+(fail-open).
+
+### Enrichment (GeoIP/ASN)
+
+Optional: a local MaxMind database (`enrich.geoip_db`; GeoLite2-City covers
+country, city and ASN in one file). Reads are in-memory only — Honeysight
+makes **no** external calls anywhere; you provide the database file
+(free account at dev.maxmind.com).
+
+### Redis decoy
+
+The `:6380` listener (usually `:6379` on a VPS) pretends to be Redis 7.2.4.
+`AUTH` accepts **any** credentials (both `AUTH pass` and `AUTH user pass`)
+and always answers `+OK` — the credentials themselves are captured in the
+`action=auth` event.
+
+The keyspace is seeded with the source's canary set (the same registry as
+web and SSH): `northwind:api:secret`, `northwind:db:password`,
+`northwind:db:host`, `northwind:aws:*`, `northwind:admin:username`,
+`northwind:gateway:internal`. `PING/ECHO/SELECT/INFO/DBSIZE/KEYS/SCAN/GET/
+MGET/EXISTS/TTL/TYPE/STRLEN/SET/CONFIG/CLIENT` answer plausibly; `FLUSHALL`
+and `SLAVEOF` "work"; `SHUTDOWN` does not take the honeypot down.
+
+Every command is an `action=cmd` event: the `redis-recon` (KEYS *, INFO,
+CONFIG GET, ...) and `redis-abuse` (FLUSHALL, CONFIG SET, SLAVEOF, EVAL, ...)
+rules highlight exploitation attempts. Quarantine is shared: blocked sources
+get tarpit-delayed replies.
 
 ### SSH decoy
 
@@ -105,6 +149,7 @@ internal/fingerprint/  ClientHello parsing, JA3, TLS listener
 internal/tlsutil/      self-signed certificate auto-generation
 internal/decoy/web/    HTTP deception listener + bait (portal, admin, metadata)
 internal/decoy/ssh/    OpenSSH server: login capture + fake shell with canaries
+internal/decoy/redis/  Redis 7.2: AUTH capture + fake keyspace with canaries (RESP)
 rules/                 default signature rules
 ```
 

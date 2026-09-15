@@ -111,3 +111,16 @@ rules:
     category: recon-scanner
     weight: 20
     user_agent: 'sqlmap|nikto|nmap|masscan|dirbuster|gobuster|wpscan|acunetix|nuclei|zgrab|nessus|whatweb|python-requests|go-http-client|libwww-perl|curl/|wget/'
+
+  # --- Redis (RESP commands arrive in Body) ---
+  - id: redis-recon
+    category: redis-recon
+    weight: 15
+    patterns:
+      - '(?i)^\s*(KEYS\s+\*|SCAN\b|INFO\b|CONFIG\s+GET|DBSIZE|TYPE\s+)'
+
+  - id: redis-abuse
+    category: redis-abuse
+    weight: 40
+    patterns:
+      - '(?i)^\s*(FLUSHALL|FLUSHDB|SHUTDOWN|CONFIG\s+SET|SLAVEOF|REPLICAOF|MODULE\s+LOAD|DEBUG|EVAL|EVALSHA)\b'

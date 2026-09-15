@@ -15,6 +15,7 @@ type Config struct {
 		HTTP  string `yaml:"http"`
 		HTTPS string `yaml:"https"` // empty = TLS listener disabled
 		SSH   string `yaml:"ssh"`   // empty = SSH listener disabled
+		Redis string `yaml:"redis"` // empty = Redis listener disabled
 	} `yaml:"listen"`
 	// TLSCertDir holds the (auto-generated) self-signed certificate.
 	TLSCertDir string `yaml:"tls_cert_dir"`
@@ -68,6 +69,7 @@ func Load(path string) (*Config, error) {
 	c.Listen.HTTP = ":8080"
 	c.Listen.HTTPS = ":8443"
 	c.Listen.SSH = ":2222"
+	c.Listen.Redis = ":6380"
 	c.TLSCertDir = "data/tls"
 	c.SSHHostKeyDir = "data/ssh"
 	c.Storage.SQLitePath = "data/honeysight.db"
