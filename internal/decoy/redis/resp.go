@@ -64,7 +64,7 @@ func (rd *reader) tryParse() (*Command, bool, error) {
 	// Inline command (telnet-style: "GET key\r\n").
 	if b[0] != '*' && b[0] != '$' && b[0] != '+' && b[0] != '-' && b[0] != ':' {
 		if i := bytesIndexCR(b); i >= 0 {
-			line := strings.TrimRight(string(b[:i]), "\r\n")
+			line := strings.Trim(string(b[:i]), "\r\n")
 			rd.buf = b[i+2:]
 			if line == "" {
 				return nil, false, nil
@@ -126,6 +126,11 @@ func parseArray(b []byte) (*Command, []byte, error) {
 		start := off + end + 2
 		if start+l+2 > len(b) {
 			return nil, b, nil
+		}
+		// A malformed length desynchronises the stream; reject it so we
+		// never start parsing a payload tail as a new command.
+		if b[start+l] != '\r' || b[start+l+1] != '\n' {
+			return nil, nil, fmt.Errorf("bad bulk terminator")
 		}
 		arg := string(b[start : start+l])
 		args = append(args, arg)

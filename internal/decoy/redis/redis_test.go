@@ -293,3 +293,20 @@ func TestRedisAbuseDetected(t *testing.T) {
 		t.Errorf("benign GET scored %d", d.Score)
 	}
 }
+
+// TestMalformedBulkLengthDesync guards against a classic RESP desync:
+// a short declared length must fail the connection, not bleed into the
+// next command as a fake inline command.
+func TestMalformedBulkLengthDesync(t *testing.T) {
+	pkt := []byte("*2\r\n$4\r\nAUTH\r\n$6\r\nhunter2\r\n*2\r\n$3\r\nGET\r\n$3\r\nfoo\r\n")
+	rd := newReader(bytes.NewReader(pkt))
+	// The AUTH frame itself is malformed ($6 for "hunter2"): the parser
+	// must reject the stream, not return a truncated password.
+	cmd, err := rd.readCommand()
+	if err == nil {
+		t.Fatalf("expected protocol error, got cmd %+v", cmd)
+	}
+	if cmd != nil {
+		t.Fatalf("expected no command on error, got %+v", cmd)
+	}
+}
