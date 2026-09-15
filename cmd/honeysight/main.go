@@ -19,6 +19,7 @@ import (
 	"github.com/honeysight/honeysight/internal/canary"
 	"github.com/honeysight/honeysight/internal/config"
 	"github.com/honeysight/honeysight/internal/core"
+	decoyssh "github.com/honeysight/honeysight/internal/decoy/ssh"
 	"github.com/honeysight/honeysight/internal/decoy/web"
 	"github.com/honeysight/honeysight/internal/detect"
 	"github.com/honeysight/honeysight/internal/fingerprint"
@@ -113,8 +114,18 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	go func() { errCh <- srv.ListenAndServe() }()
+
+	// Optional SSH listener: fake OpenSSH server with a canary-seeded shell.
+	if cfg.Listen.SSH != "" {
+		hostKey, err := decoyssh.EnsureHostKey(cfg.SSHHostKeyDir)
+		if err != nil {
+			fatal(log, "ssh host key", err)
+		}
+		sshSrv := decoyssh.New(log, bus, tracker, engine, canaries, cfg.Tarpit, hostKey)
+		go func() { errCh <- sshSrv.ListenAndServe(cfg.Listen.SSH) }()
+	}
 
 	// Optional TLS listener: same handler, plus ClientHello (JA3) capture.
 	if cfg.Listen.HTTPS != "" {

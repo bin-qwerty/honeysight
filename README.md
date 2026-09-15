@@ -37,6 +37,8 @@ curl -s -c jar -L -d "user=admin&pass=x" \
      localhost:8080/admin/login              # «успешный» вход → дашборд с данными
 curl -sk -L -d "user=root&pass=y" \
      https://localhost:8443/admin/login      # то же по TLS (JA3 фиксируется)
+ssh -p 2222 root@localhost                   # fake-OpenSSH: любой пароль,
+                                             # шелл с «уточками» и canaries
 ```
 
 События попадают в `data/honeysight.db` (SQLite):
@@ -57,7 +59,7 @@ sqlite3 data/honeysight.db \
 ```
 Слушатели (приманки):               Конвейер:                  Приёмники:
 ┌─ web  (HTTP-приманки)     ─┐      захват → нормализация →    ┌─ SQLite (события)
-├─ ssh  (M2)                ─┼──► Bus ──► детекция (YAML-правила) ┼─ структурный лог
+├─ ssh  (OpenSSH + шелл)    ─┼──► Bus ──► детекция (YAML-правила) ┼─ структурный лог
 └─ redis (M4)               ─┘       → скор → трекер (окно,   └─ экспорт IOC (M3)
                                     карантин/tarpit)                JSON + STIX 2.1
 ```
@@ -88,6 +90,7 @@ internal/canary/       canary-токены: генерация, реестр, SQ
 internal/fingerprint/  разбор ClientHello, JA3, TLS-слушатель
 internal/tlsutil/      самоподписанный сертификат (автогенерация)
 internal/decoy/web/    HTTP-слушатель + приманки (портал, админка, metadata)
+internal/decoy/ssh/    OpenSSH-сервер: захват логинов + fake-шелл с canaries
 rules/                 правила детекции по умолчанию
 ```
 
@@ -120,6 +123,21 @@ rules/                 правила детекции по умолчанию
 Все токены пишутся в SQLite (`<db>-canaries.db`). Если позже где-то
 (у атакующего, в дампе, на пастebin) появилось значение токена — источник
 подтверждён: это был он.
+
+### SSH-приманка
+
+Слушатель `:2222` выдаёт себя за `OpenSSH_8.9p1 Ubuntu`. Любые креденшелы
+принимаются (password, publickey, keyboard-interactive); предложенный
+public-ключ фиксируется по SHA256-отпечатку — сам по себе отличный IOC.
+После «входа» открывается интерактивный шелл в образе Ubuntu-сервера
+`northwind-app01` (postgres, redis, node-api):
+
+- `whoami`, `id`, `ls`, `env`, `ps`, `netstat`, `last` и др. — правдоподобный вывод;
+- `.env`, `deploy.sh`, `notes.txt`, `.bash_history`, `/etc/passwd`, `/etc/shadow`
+  содержат **canary-токены этого источника** (те же наборы, что у web-админки);
+- каждая команда — событие `action=cmd` с полным текстом: движок детекции
+  ловит `; nc 1.2.3.4 4444`, `| sh`, `/etc/passwd` и прочий шелл-реверс;
+- quarantine/tarpit общий: зачаренный источник получает ответы с задержкой.
 
 ### Отпечатки (JA3)
 
@@ -160,7 +178,9 @@ Severity: `low` 1–24 · `medium` 25–49 · `high` 50–79 · `critical` 80–
 |---|---|---|
 | `listen.http` | `:8080` | Адрес HTTP-слушателя |
 | `listen.https` | `:8443` | Адрес TLS-слушателя (пусто = выключить) |
+| `listen.ssh` | `:2222` | Адрес SSH-слушателя (пусто = выключить) |
 | `tls_cert_dir` | `data/tls` | Каталог сертификата (создаётся автоматически) |
+| `ssh_host_key_dir` | `data/ssh` | Каталог SSH host-ключа (создаётся автоматически) |
 | `storage.sqlite_path` | `data/honeysight.db` | Файл БД (canaries — в `<path>-canaries.db`) |
 | `rules.path` | `rules/default.yml` | Файл правил |
 | `block_threshold` | `100` | Окно-скор, срабатывающий карантин |

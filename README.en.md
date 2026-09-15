@@ -28,6 +28,7 @@ curl -s localhost:8080/.env             # fake but convincing
 curl -s -A "sqlmap/1.8" localhost:8080/
 curl -s -c jar -L -d "user=admin&pass=x" localhost:8080/admin/login  # fake login -> data dashboard
 curl -sk -L -d "user=root&pass=y" https://localhost:8443/admin/login # over TLS (JA3 captured)
+ssh -p 2222 root@localhost   # fake OpenSSH: any password, canary-seeded shell
 ```
 
 Events land in `data/honeysight.db` (SQLite):
@@ -41,7 +42,7 @@ sqlite3 data/honeysight.db "SELECT ts, source_ip, score, severity, categories, a
 ```
 Listeners (deception):                Pipeline:                 Sinks:
 ┌─ web (HTTP decoy)        ─┐        capture → normalize →     ┌─ SQLite (events)
-├─ ssh   (M2)              ─┼──► Bus ──► detect (YAML rules) ──┼─ structured log
+├─ ssh (OpenSSH + shell)   ─┼──► Bus ──► detect (YAML rules) ──┼─ structured log
 └─ redis (M4)              ─┘        → score → track (window,  └─ IOC export (M3)
                                      quarantine/tarpit)             JSON + STIX 2.1
 ```
@@ -73,6 +74,23 @@ for an hour, then rotate. All tokens are persisted in SQLite
 (`<db>-canaries.db`) for later "canary hit" correlation. The session cookie
 value is the canary set id itself.
 
+### SSH decoy
+
+The `:2222` listener pretends to be `OpenSSH_8.9p1 Ubuntu`. Any credentials
+are accepted (password, publickey, keyboard-interactive); offered public keys
+are recorded by SHA256 fingerprint — a strong IOC on its own. After "login"
+you get an interactive shell on an Ubuntu box (`northwind-app01` with
+postgres, redis and a node API):
+
+- `whoami`, `id`, `ls`, `env`, `ps`, `netstat`, `last`, ... — plausible output;
+- `.env`, `deploy.sh`, `notes.txt`, `.bash_history`, `/etc/passwd`,
+  `/etc/shadow` carry **this source's canary tokens** (the same sets as the
+  web admin console);
+- every command is published as an `action=cmd` event with the full command
+  text: the detection engine catches `; nc 1.2.3.4 4444`, `| sh`,
+  `/etc/passwd` and other reverse-shell patterns;
+- quarantine/tarpit is shared: blocked sources get delayed answers.
+
 ## Layout
 
 ```
@@ -86,6 +104,7 @@ internal/canary/       canary tokens: generation, registry, SQLite
 internal/fingerprint/  ClientHello parsing, JA3, TLS listener
 internal/tlsutil/      self-signed certificate auto-generation
 internal/decoy/web/    HTTP deception listener + bait (portal, admin, metadata)
+internal/decoy/ssh/    OpenSSH server: login capture + fake shell with canaries
 rules/                 default signature rules
 ```
 

@@ -2,9 +2,12 @@
 listen:
   http: ":8080"
   https: ":8443"      # TLS decoy: auto-generated self-signed cert + JA3 capture
+  ssh: ":2222"        # fake OpenSSH: any credentials work, canary-seeded shell
 
 # Directory for the auto-generated self-signed TLS certificate.
 tls_cert_dir: "data/tls"
+# Directory for the auto-generated SSH host key.
+ssh_host_key_dir: "data/ssh"
 
 storage:
   sqlite_path: "data/honeysight.db"   # canary tokens live in <path>-canaries.db

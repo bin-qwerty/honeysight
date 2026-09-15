@@ -14,10 +14,13 @@ type Config struct {
 	Listen struct {
 		HTTP  string `yaml:"http"`
 		HTTPS string `yaml:"https"` // empty = TLS listener disabled
+		SSH   string `yaml:"ssh"`   // empty = SSH listener disabled
 	} `yaml:"listen"`
 	// TLSCertDir holds the (auto-generated) self-signed certificate.
 	TLSCertDir string `yaml:"tls_cert_dir"`
-	Storage    struct {
+	// SSHHostKeyDir holds the (auto-generated) SSH host key.
+	SSHHostKeyDir string `yaml:"ssh_host_key_dir"`
+	Storage       struct {
 		SQLitePath string `yaml:"sqlite_path"`
 	} `yaml:"storage"`
 	Rules struct {
@@ -53,7 +56,9 @@ func Load(path string) (*Config, error) {
 	c := &Config{}
 	c.Listen.HTTP = ":8080"
 	c.Listen.HTTPS = ":8443"
+	c.Listen.SSH = ":2222"
 	c.TLSCertDir = "data/tls"
+	c.SSHHostKeyDir = "data/ssh"
 	c.Storage.SQLitePath = "data/honeysight.db"
 	c.Rules.Path = "rules/default.yml"
 	c.BlockThreshold = 100
